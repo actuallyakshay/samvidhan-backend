@@ -1,5 +1,13 @@
 import { plainToClass } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, validateSync } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  validateSync,
+  ValidateIf,
+} from 'class-validator';
 
 enum EnvironmentType {
   DEV = 'development',
@@ -65,6 +73,11 @@ class EnvironmentVariables {
   @IsOptional()
   GOOGLE_SERVICE_ACCOUNT_KEY_JSON?: string;
 
+  /** Firebase service account JSON (same project as the client FCM SDK) for server-side FCM sends. */
+  @IsString()
+  @IsOptional()
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+
   @IsString()
   @IsNotEmpty()
   GOOGLE_REFRESH_TOKEN: string;
@@ -116,6 +129,32 @@ class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   MAIL_FROM: string;
+
+  /** Set to true when using implicit TLS (typical for port 465). Omit or false for STARTTLS (typical for 587). */
+  @IsString()
+  @IsOptional()
+  MAIL_SECURE?: string;
+
+  /** Nodemailer connection timeout in ms (default 60000). Lower on Railway to fail fast if SMTP is unreachable. */
+  @IsNumber()
+  @IsOptional()
+  MAIL_CONNECTION_TIMEOUT_MS?: number;
+
+  /** If set, Razorpay API + webhooks are enabled; key secret and webhook secret are then required. */
+  @IsString()
+  @IsOptional()
+  RAZORPAY_KEY_ID?: string;
+
+  @ValidateIf((o) => !!o.RAZORPAY_KEY_ID?.trim())
+  @IsString()
+  @IsNotEmpty()
+  RAZORPAY_KEY_SECRET?: string;
+
+  /** Webhook signing secret from the Razorpay Dashboard (not the API key secret). */
+  @ValidateIf((o) => !!o.RAZORPAY_KEY_ID?.trim())
+  @IsString()
+  @IsNotEmpty()
+  RAZORPAY_WEBHOOK_SECRET?: string;
 }
 
 export function validateConfig(configuration: Record<string, unknown>) {

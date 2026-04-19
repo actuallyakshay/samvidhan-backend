@@ -1,8 +1,8 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { MailerService } from '@nestjs-modules/mailer';
+import { ConfigService } from '@nestjs/config';
+import { Resend } from 'resend';
 
 export type SendAdminLoginOtpInput = {
-  to: string[];
   requestingEmail: string;
   code: string;
   expiresMinutes: number;
@@ -10,13 +10,14 @@ export type SendAdminLoginOtpInput = {
 
 @Injectable()
 export class MailService {
-  constructor(private readonly mailerService: MailerService) {}
+  private readonly resend: Resend;
+  constructor(private readonly configService: ConfigService) {
+    this.resend = new Resend(this.configService.getOrThrow<string>('RESEND_API_KEY'));
+  }
 
   async sendAdminLoginOtp(input: SendAdminLoginOtpInput): Promise<void> {
-    const { to, requestingEmail, code, expiresMinutes } = input;
-    if (!to.length) {
-      throw new InternalServerErrorException('No OTP email recipients');
-    }
+    const {  requestingEmail, code, expiresMinutes } = input;
+  
 
     const text = [
       `Admin sign-in OTP request`,
@@ -36,16 +37,29 @@ export class MailService {
       <p style="color:#666;font-size:13px;">Share this code only if you approve this sign-in.</p>
     `;
 
+
     try {
-      await this.mailerService.sendMail({
-        to,
+      const { data, error } = await this.resend.emails.send({
+        from : 'akshay.rajput1197@gmail.com',
+        to:['akshay.rajput1197@gmail.com'],
         subject: `Admin OTP for ${requestingEmail}`,
         text,
         html,
       });
+
+      if (error) {
+        console.error('Resend API error:', error);
+        throw new InternalServerErrorException(
+          typeof error.message === 'string' ? error.message : 'Failed to send OTP email',
+        );
+      }
+
+      console.log('OTP email sent', data?.id ?? data);
     } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
       console.error('OTP email error:', error);
       throw new InternalServerErrorException('Failed to send OTP email');
     }
   }
 }
+

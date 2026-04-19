@@ -11,4 +11,9 @@ export class UpdateSettingsInput {
   @ApiPropertyOptional({ example: '+1234567890' })
   @IsOptional()
   supportPhone?: string;
+
+  @ApiPropertyOptional({ example: '123 Main St, Anytown, USA' })
+  @IsString()
+  @IsOptional()
+  supportAddress?: string;
 }

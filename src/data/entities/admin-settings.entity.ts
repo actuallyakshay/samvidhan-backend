@@ -10,4 +10,7 @@ export class AdminSettingsEntity {
 
   @Column({ name: 'support_phone', nullable: true })
   supportPhone: string;
+
+  @Column({ name: 'support_address', nullable: true })
+  supportAddress: string;
 }

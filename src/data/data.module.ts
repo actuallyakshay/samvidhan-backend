@@ -24,7 +24,8 @@ import * as repositories from './repositories';
           username: configService.getOrThrow('DB_USERNAME'),
           password: configService.getOrThrow('DB_PASSWORD'),
           database: configService.getOrThrow('DB_DATABASE'),
-          entities: [join(process.cwd(), 'dist/src/data/entities/*.entity.js')],
+          /** Class list must stay in sync with `TypeOrmModule.forFeature` — globs alone can miss new entities in dev. */
+          entities: Object.values(entities),
           migrations: [join(process.cwd(), 'dist/src/data/migrations/*.js')],
           migrationsRun: true,
           synchronize: false,

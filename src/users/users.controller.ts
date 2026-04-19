@@ -24,6 +24,11 @@ export class UsersController {
     return this.usersService.getUserAnalytics({ userId: user.sub });
   }
 
+  @Patch('update-fcm-token')
+  updateFcmToken(@Body() body: { fcmToken: string }, @CurrentUser() user: IJwtPayload) {
+    return this.usersService.updateFcmToken({ userId: user.sub, body });
+  }
+
   @Patch()
   updateMe(@Body() body: UpdateUserInput, @CurrentUser() user: IJwtPayload) {
     return this.usersService.updateUser({ userId: user.sub, body });

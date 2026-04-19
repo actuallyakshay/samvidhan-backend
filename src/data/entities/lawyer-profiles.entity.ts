@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { LawyerPracticeAreasEntity } from './lawyer-practice-areas.entity';
 import { UsersEntity } from './users.entity';
+import { LawyerDocumentsEntity } from './lawyer-documents.entity';
 
 @Entity('lawyer_profiles')
 export class LawyerProfilesEntity {
@@ -25,6 +26,10 @@ export class LawyerProfilesEntity {
   @Column({ name: 'user_id' })
   @Index()
   userId: string;
+
+  @Column({ name: 'is_verified', default: false })
+  @Index()
+  isVerified: boolean;
 
   @Column({ name: 'degree', nullable: true })
   degree: string;
@@ -61,6 +66,9 @@ export class LawyerProfilesEntity {
 
   @OneToMany(() => LawyerPracticeAreasEntity, (lpa) => lpa.lawyerProfile)
   lawyerPracticeAreas: Relation<LawyerPracticeAreasEntity[]>;
+
+  @OneToMany(() => LawyerDocumentsEntity, (ld) => ld.lawyerProfile)
+  documents: Relation<LawyerDocumentsEntity[]>;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

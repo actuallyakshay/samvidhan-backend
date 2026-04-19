@@ -1,8 +1,9 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
@@ -15,8 +16,10 @@ function parseCorsOrigins(raw: string | undefined): string[] {
 }
 
 async function bootstrap() {
-  const logger = new Logger('Nyaya');
-  const app = await NestFactory.create(AppModule);
+  // Prefer A over AAAA on hosts where IPv6 egress is broken (common on Railway → Gmail SMTP).
+
+  const logger = new Logger('Samvidhan');
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.useWebSocketAdapter(new IoAdapter(app));
 
   const configService = app.get(ConfigService);
@@ -45,7 +48,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Nyaya API')
+    .setTitle('Samvidhan API')
     .setVersion('1.0')
     .addBearerAuth()
     .build();

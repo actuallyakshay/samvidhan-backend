@@ -9,6 +9,18 @@ export class SubscriptionsService {
   getAllSubscriptionPlans() {
     return this.spRepository.find({
       where: { isActive: true },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        features: true,
+        priceInr: true,
+        billingCycle: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
   }
 

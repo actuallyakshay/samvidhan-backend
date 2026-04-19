@@ -13,8 +13,9 @@ import { AdminModule } from './admin/admin.module';
 import { AssetsModule } from './assets/assets.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { GoogleMeetModule } from './google-meet/google-meet.module';
-import { MailModule } from './mail/mail.module';
 import { CaseChatModule } from './case-chat/case-chat.module';
+import { PushModule } from './push/push.module';
+import { RazorpayModule } from './razorpay/razorpay.module';
 
 @Module({
   imports: [
@@ -34,8 +35,9 @@ import { CaseChatModule } from './case-chat/case-chat.module';
     AssetsModule,
     SubscriptionsModule,
     GoogleMeetModule,
-    MailModule,
     CaseChatModule,
+    PushModule,
+    RazorpayModule,
   ],
   controllers: [AppController],
   providers: [AppService],

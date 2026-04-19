@@ -1,28 +1,51 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { mapCaseMessageEntity, type CaseMessagePayload } from 'src/cases/case-message.mapper';
+import { CaseChatReadStateRepository } from 'src/data/repositories/case-chat-read-state.repository';
 import { CaseMessagesRepository } from 'src/data/repositories/case-messages.repository';
 import { CasesRepository } from 'src/data/repositories/cases.repository';
-import { LawyerProfilesRepository } from 'src/data/repositories/lawyer-profiles.repository';
-import { MessageType, RoleCode } from 'src/enums';
-import { caseChatRoom, MAX_CHAT_TEXT_LENGTH } from './case-chat.constants';
+import {
+  CaseMessageParticipantKind,
+  MessageType,
+  RoleCode,
+} from 'src/enums';
 import { CaseChatSocketUser } from 'src/types';
+import { caseChatRoom } from './case-chat.constants';
 import { ChatSendDto } from './dto/chat-send.dto';
+
+type CaseMessagePayload = {
+  id: string;
+  senderRole: CaseMessageParticipantKind;
+  content: string;
+  timestamp: string;
+  messageType: MessageType;
+  assetUrl?: string | null;
+  assetName?: string | null;
+};
+
+function inferThreadMessageType(
+  assetUrl: string | undefined,
+  assetName?: string
+): MessageType {
+  if (!assetUrl) return MessageType.TEXT;
+  const hint = `${assetName ?? ''} ${assetUrl}`.toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(hint)) {
+    return MessageType.IMAGE;
+  }
+  if (/\/image\//i.test(assetUrl) || hint.includes('image%2f')) {
+    return MessageType.IMAGE;
+  }
+  return MessageType.DOCUMENT;
+}
 
 @Injectable()
 export class CaseChatService {
   constructor(
     private readonly casesRepository: CasesRepository,
     private readonly caseMessagesRepository: CaseMessagesRepository,
-    private readonly lawyerProfilesRepository: LawyerProfilesRepository
+    private readonly caseChatReadStateRepository: CaseChatReadStateRepository
   ) {}
 
   room(caseId: string) {
     return caseChatRoom(caseId);
-  }
-
-  async joinRoom(user: CaseChatSocketUser, caseId: string): Promise<void> {
-    const caseEntity = await this.getCaseWithAccessContext(caseId);
-    await this.assertCanAccessWithEntity(user, caseEntity);
   }
 
   async persistAndBroadcastPayload(user: CaseChatSocketUser, dto: ChatSendDto): Promise<{
@@ -32,65 +55,71 @@ export class CaseChatService {
     ownerUserId: string;
     lawyerUserId: string | null;
   }> {
-    const text = dto.text.trim();
-    if (!text) throw new ForbiddenException('Empty message');
+    const text = (dto.text ?? '').trim();
+    const assetUrl = (dto.assetUrl ?? '').trim();
+    if (!text && !assetUrl) {
+      throw new ForbiddenException('Empty message');
+    }
+    if (assetUrl && !/^https?:\/\//i.test(assetUrl)) {
+      throw new ForbiddenException('Invalid asset URL');
+    }
 
-    const caseEntity = await this.getCaseWithAccessContext(dto.caseId);
-    await this.assertCanAccessWithEntity(user, caseEntity);
+    const caseEntity = await this.casesRepository.findOne({
+      where: { id: dto.caseId },
+      relations: { assignedLawyer: true },
+      select: {
+        id: true,
+        caseCode: true,
+        userId: true,
+        assignedLawyer: { userId: true },
+      },
+    });
+    if (!caseEntity) throw new NotFoundException('Case not found');
+
+    const senderKind: CaseMessageParticipantKind =
+      user.isAdmin || user.activeRole === RoleCode.ADMIN
+        ? CaseMessageParticipantKind.ADMIN
+        : user.activeRole === RoleCode.LAWYER || user.activeRole === 'lawyer'
+          ? CaseMessageParticipantKind.LAWYER
+          : CaseMessageParticipantKind.USER;
+
+    const messageType = inferThreadMessageType(
+      assetUrl || undefined,
+      dto.assetName?.trim()
+    );
+    const assetName = dto.assetName?.trim() || null;
 
     const saved = await this.caseMessagesRepository.save({
       caseId: dto.caseId,
-      senderId: user.sub,
-      messageType: MessageType.TEXT,
-      messageText: text.slice(0, MAX_CHAT_TEXT_LENGTH),
+      senderKind,
+      messageType,
+      messageText: text || null,
+      assetUrl: assetUrl || null,
+      assetName,
     });
+
+    await this.caseChatReadStateRepository.upsertLastRead(dto.caseId, senderKind, saved.id);
 
     const full = await this.caseMessagesRepository.findOne({
       where: { id: saved.id },
-      relations: { sender: true },
     });
     if (!full) throw new NotFoundException('Message not found');
 
-    const ctx = {
-      caseUserId: caseEntity.userId,
-      assignedLawyerUserId: caseEntity.assignedLawyer?.userId ?? null,
-    };
-    const mapped = mapCaseMessageEntity(full, ctx);
-    if (!mapped) throw new NotFoundException('Message not found');
     return {
-      message: mapped,
+      message: {
+        id: full.id,
+        senderRole: full.senderKind,
+        content: full.messageText ?? '',
+        timestamp:
+          full.createdAt instanceof Date ? full.createdAt.toISOString() : String(full.createdAt),
+        messageType: full.messageType,
+        assetUrl: full.assetUrl ?? undefined,
+        assetName: full.assetName ?? undefined,
+      },
       caseId: dto.caseId,
       caseCode: caseEntity.caseCode,
       ownerUserId: caseEntity.userId,
       lawyerUserId: caseEntity.assignedLawyer?.userId ?? null,
     };
-  }
-
-  private async getCaseWithAccessContext(caseId: string) {
-    const caseEntity = await this.casesRepository
-      .createQueryBuilder('c')
-      .leftJoin('c.assignedLawyer', 'assignedLawyer')
-      .addSelect(['assignedLawyer.id', 'assignedLawyer.userId'])
-      .where('c.id = :caseId', { caseId })
-      .getOne();
-
-    if (!caseEntity) throw new NotFoundException('Case not found');
-    return caseEntity;
-  }
-
-  private async assertCanAccessWithEntity(
-    user: CaseChatSocketUser,
-    caseEntity: { userId: string; assignedLawyerId?: string | null }
-  ): Promise<void> {
-    if (user.isAdmin) return;
-    if (caseEntity.userId === user.sub) return;
-
-    const active = user.activeRole;
-    if (active === RoleCode.LAWYER || active === 'lawyer') {
-      const profile = await this.lawyerProfilesRepository.findOne({ where: { userId: user.sub } });
-      if (profile && caseEntity.assignedLawyerId === profile.id) return;
-    }
-
-    throw new ForbiddenException('Not allowed for this case');
   }
 }

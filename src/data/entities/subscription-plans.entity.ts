@@ -35,6 +35,9 @@ export class SubscriptionPlansEntity {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
+  @Column({ name: 'razorpay_plan_id', type: 'varchar', length: 64, nullable: true })
+  razorpayPlanId: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

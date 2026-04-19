@@ -1,6 +1,7 @@
 export * from './users.repository';
 export * from './user-roles.repository';
 export * from './lawyer-profiles.repository';
+export * from './lawyer-documents.repository';
 export * from './practice-areas.repository';
 export * from './lawyer-practice-areas.repository';
 export * from './cases.repository';
@@ -9,6 +10,7 @@ export * from './assets.repository';
 export * from './case-messages.repository';
 export * from './case-chat-read-state.repository';
 export * from './subscription-plans.repository';
+export * from './user-subscriptions.repository';
 export * from './refresh-tokens.repository';
 export * from './case-session-request.repository';
 export * from './admin-settings.repository';

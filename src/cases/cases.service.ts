@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -20,8 +19,7 @@ import { AssetsRepository } from 'src/data/repositories/assets.repository';
 import { CaseSessionRequestRepository } from 'src/data/repositories/case-session-request.repository';
 import { CasesRepository } from 'src/data/repositories/cases.repository';
 import { PracticeAreasRepository } from 'src/data/repositories/practice-areas.repository';
-import { AssetType, MessageType, RoleCode } from 'src/enums';
-import { mapCaseMessageEntity } from './case-message.mapper';
+import { AssetType, CaseMessageParticipantKind, MessageType, RoleCode } from 'src/enums';
 import { AssetAuthor } from 'src/types';
 import { In } from 'typeorm';
 import {
@@ -41,6 +39,24 @@ export type CaseChatUnreadItem = {
   caseCode: string;
   title: string;
   unreadCount: number;
+};
+
+/** Thread message types exposed on REST + socket (excludes e.g. audio if unused). */
+const CASE_THREAD_MESSAGE_TYPES: MessageType[] = [
+  MessageType.TEXT,
+  MessageType.IMAGE,
+  MessageType.DOCUMENT,
+];
+
+/** Wire format for case chat (REST list + socket). */
+export type CaseMessagePayload = {
+  id: string;
+  senderRole: CaseMessageParticipantKind;
+  content: string;
+  timestamp: string;
+  messageType: MessageType;
+  assetUrl?: string | null;
+  assetName?: string | null;
 };
 
 @Injectable()
@@ -136,57 +152,33 @@ export class CasesService {
     return caseEntity;
   }
 
-  async assertCaseThreadAccess(input: {
-    caseId: string;
-    userId: string;
-    activeRole?: string;
-    isAdmin?: boolean;
-  }) {
-    const caseEntity = await this.casesRepository
-      .createQueryBuilder('c')
-      .leftJoin('c.assignedLawyer', 'assignedLawyer')
-      .addSelect(['assignedLawyer.id', 'assignedLawyer.userId'])
-      .where('c.id = :caseId', { caseId: input.caseId })
-      .getOne();
-
-    if (!caseEntity) {
-      throw new NotFoundException('Case not found');
-    }
-
-    if (input.isAdmin) return caseEntity;
-    if (caseEntity.userId === input.userId) return caseEntity;
-
-    const ar = input.activeRole;
-    if (ar === RoleCode.LAWYER || ar === 'lawyer') {
-      const profile = await this.lawyerProfilesRepository.findOne({
-        where: { userId: input.userId },
-      });
-      if (profile && caseEntity.assignedLawyerId === profile.id) return caseEntity;
-    }
-
-    throw new ForbiddenException('Not allowed for this case');
+  /** Thread row → API/socket body (text / image / document only). */
+  caseChatMessagePayload(msg: CaseMessagesEntity): CaseMessagePayload | null {
+    if (!CASE_THREAD_MESSAGE_TYPES.includes(msg.messageType)) return null;
+    return {
+      id: msg.id,
+      senderRole: msg.senderKind,
+      content: msg.messageText ?? '',
+      timestamp: msg.createdAt instanceof Date ? msg.createdAt.toISOString() : String(msg.createdAt),
+      messageType: msg.messageType,
+      assetUrl: msg.assetUrl ?? undefined,
+      assetName: msg.assetName ?? undefined,
+    };
   }
 
   async getCaseMessagesPage(input: {
     caseId: string;
-    userId: string;
-    activeRole?: string;
-    isAdmin?: boolean;
     beforeMessageId?: string;
     limit?: number;
   }) {
     const limit = Math.min(Math.max(input.limit ?? 30, 1), 100);
-    const caseEntity = await this.assertCaseThreadAccess(input);
-    const ctx = {
-      caseUserId: caseEntity.userId,
-      assignedLawyerUserId: caseEntity.assignedLawyer?.userId ?? null,
-    };
 
     const qb = this.caseMessagesRepository
       .createQueryBuilder('m')
-      .leftJoinAndSelect('m.sender', 'sender')
       .where('m.caseId = :caseId', { caseId: input.caseId })
-      .andWhere('m.messageType = :mt', { mt: MessageType.TEXT })
+      .andWhere('m.messageType IN (:...mts)', {
+        mts: [...CASE_THREAD_MESSAGE_TYPES],
+      })
       .orderBy('m.createdAt', 'DESC')
       .addOrderBy('m.id', 'DESC')
       .take(limit + 1);
@@ -211,8 +203,8 @@ export class CasesService {
     const hasMore = rows.length > limit;
     const slice = hasMore ? rows.slice(0, limit) : rows;
     const mapped = slice
-      .map((r) => mapCaseMessageEntity(r, ctx))
-      .filter((m): m is NonNullable<typeof m> => m !== null)
+      .map((r) => this.caseChatMessagePayload(r))
+      .filter((m): m is CaseMessagePayload => m !== null)
       .reverse();
 
     return {
@@ -241,18 +233,21 @@ export class CasesService {
       });
     }
 
-    return this.buildUnreadSummary(caseRows, userId);
+    const readerKind =
+      activeRole === RoleCode.LAWYER || activeRole === 'lawyer'
+        ? CaseMessageParticipantKind.LAWYER
+        : CaseMessageParticipantKind.USER;
+    return this.buildUnreadSummary(caseRows, readerKind);
   }
 
   async getCaseChatUnreadSummaryForAdmin(input: { userId: string }) {
     const caseIdsRows: { caseId: string }[] = await this.caseMessagesRepository.query(
       `SELECT case_id AS "caseId"
        FROM case_messages
-       WHERE message_type = $1
+       WHERE message_type IN ('text', 'image', 'document')
        GROUP BY case_id
        ORDER BY MAX(created_at) DESC
-       LIMIT 150`,
-      [MessageType.TEXT]
+       LIMIT 150`
     );
     const ids = caseIdsRows.map((r) => r.caseId);
     if (!ids.length) {
@@ -266,7 +261,7 @@ export class CasesService {
     const order = new Map(ids.map((id, i) => [id, i]));
     caseRows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
-    return this.buildUnreadSummary(caseRows, input.userId);
+    return this.buildUnreadSummary(caseRows, CaseMessageParticipantKind.ADMIN);
   }
 
   async markCaseChatRead(input: {
@@ -276,62 +271,49 @@ export class CasesService {
     isAdmin?: boolean;
     body?: MarkCaseChatReadDto;
   }) {
-    await this.assertCaseThreadAccess({
-      caseId: input.caseId,
-      userId: input.userId,
-      activeRole: input.activeRole,
-      isAdmin: input.isAdmin,
-    });
+    const readerKind =
+      input.isAdmin || input.activeRole === RoleCode.ADMIN
+        ? CaseMessageParticipantKind.ADMIN
+        : input.activeRole === RoleCode.LAWYER || input.activeRole === 'lawyer'
+          ? CaseMessageParticipantKind.LAWYER
+          : CaseMessageParticipantKind.USER;
 
     const messageId = input.body?.messageId;
     let msg: CaseMessagesEntity | null = null;
 
     if (messageId) {
       msg = await this.caseMessagesRepository.findOne({
-        where: { id: messageId, caseId: input.caseId, messageType: MessageType.TEXT },
+        where: {
+          id: messageId,
+          caseId: input.caseId,
+          messageType: In([...CASE_THREAD_MESSAGE_TYPES]),
+        },
       });
       if (!msg) {
         throw new BadRequestException('Invalid messageId');
       }
     } else {
       msg = await this.caseMessagesRepository.findOne({
-        where: { caseId: input.caseId, messageType: MessageType.TEXT },
+        where: { caseId: input.caseId, messageType: In([...CASE_THREAD_MESSAGE_TYPES]) },
         order: { createdAt: 'DESC', id: 'DESC' },
       });
     }
 
-    let row = await this.caseChatReadStateRepository.findOne({
-      where: { userId: input.userId, caseId: input.caseId },
-    });
-
     if (!msg) {
-      if (row) {
-        row.lastReadMessageId = null;
-        await this.caseChatReadStateRepository.save(row);
-      }
+      await this.caseChatReadStateRepository.upsertLastRead(input.caseId, readerKind, null);
       return { ok: true as const, lastReadMessageId: null as string | null };
     }
 
-    if (!row) {
-      row = this.caseChatReadStateRepository.create({
-        userId: input.userId,
-        caseId: input.caseId,
-        lastReadMessageId: msg.id,
-      });
-    } else {
-      row.lastReadMessageId = msg.id;
-    }
-    await this.caseChatReadStateRepository.save(row);
-
+    await this.caseChatReadStateRepository.upsertLastRead(input.caseId, readerKind, msg.id);
     return { ok: true as const, lastReadMessageId: msg.id };
   }
 
   private async buildUnreadSummary(
     caseRows: { id: string; caseCode: string; title: string }[],
-    userId: string
+    readerKind: CaseMessageParticipantKind
   ): Promise<{ items: CaseChatUnreadItem[]; totalUnread: number }> {
     const ids = caseRows.map((c) => c.id);
-    const counts = await this.countUnreadByCaseIds(ids, userId);
+    const counts = await this.countUnreadByCaseIds(ids, readerKind);
     const items = caseRows
       .map((c) => ({
         caseId: c.id,
@@ -347,7 +329,7 @@ export class CasesService {
 
   private async countUnreadByCaseIds(
     caseIds: string[],
-    userId: string
+    readerKind: CaseMessageParticipantKind
   ): Promise<Map<string, number>> {
     if (!caseIds.length) return new Map();
     const rows: { caseId: string; unread: string | number }[] =
@@ -356,26 +338,26 @@ export class CasesService {
         SELECT m.case_id AS "caseId", COUNT(*)::int AS unread
         FROM case_messages m
         WHERE m.case_id = ANY($1::uuid[])
-          AND m.message_type = $2
+          AND m.message_type IN ('text', 'image', 'document')
           AND (
             NOT EXISTS (
               SELECT 1 FROM case_chat_read_states r
-              WHERE r.case_id = m.case_id AND r.user_id = $3::uuid
+              WHERE r.case_id = m.case_id AND r.reader_kind = $2
             )
             OR EXISTS (
               SELECT 1 FROM case_chat_read_states r
-              WHERE r.case_id = m.case_id AND r.user_id = $3::uuid AND r.last_read_message_id IS NULL
+              WHERE r.case_id = m.case_id AND r.reader_kind = $2 AND r.last_read_message_id IS NULL
             )
             OR EXISTS (
               SELECT 1 FROM case_chat_read_states r
               INNER JOIN case_messages lr ON lr.id = r.last_read_message_id
-              WHERE r.case_id = m.case_id AND r.user_id = $3::uuid AND r.last_read_message_id IS NOT NULL
+              WHERE r.case_id = m.case_id AND r.reader_kind = $2 AND r.last_read_message_id IS NOT NULL
                 AND (m.created_at > lr.created_at OR (m.created_at = lr.created_at AND m.id > lr.id))
             )
           )
         GROUP BY m.case_id
         `,
-        [caseIds, MessageType.TEXT, userId]
+        [caseIds, readerKind]
       );
     return new Map(
       rows.map((r) => [r.caseId, typeof r.unread === 'string' ? parseInt(r.unread, 10) : r.unread])

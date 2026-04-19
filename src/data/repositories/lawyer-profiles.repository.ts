@@ -15,6 +15,7 @@ export class LawyerProfilesRepository extends Repository<LawyerProfilesEntity> {
 
   getVerifiedLawyersQuery(): SelectQueryBuilder<LawyerProfilesEntity> {
     const qb = this.createQueryBuilder('lp')
+      .where('lp.is_verified = :isVerified', { isVerified: true })
       .select([
         'lp.id',
         'lp.userId',
@@ -23,6 +24,7 @@ export class LawyerProfilesRepository extends Repository<LawyerProfilesEntity> {
         'lp.careerStartDate',
         'lp.bio',
         'lp.gender',
+        'lp.isVerified',
         'lp.createdAt',
         'lp.updatedAt',
       ])
@@ -32,7 +34,8 @@ export class LawyerProfilesRepository extends Repository<LawyerProfilesEntity> {
       .leftJoinAndSelect('lp.lawyerPracticeAreas', 'lpa')
       .leftJoinAndSelect('lpa.practiceArea', 'practiceArea')
       .where('ur.status = :roleStatus', { roleStatus: UserRoleStatus.ACTIVE })
-      .andWhere('ur.roleCode = :roleCode', { roleCode: RoleCode.LAWYER });
+      .andWhere('ur.roleCode = :roleCode', { roleCode: RoleCode.LAWYER })
+      .andWhere('lp.is_verified = :isVerified', { isVerified: true });
 
     return qb;
   }
@@ -48,26 +51,30 @@ export class LawyerProfilesRepository extends Repository<LawyerProfilesEntity> {
       .select([
         'lp.id',
         'lp.careerStartDate',
+        'lp.addressLine1',
+        'lp.addressLine2',
+        'lp.city',
         'lp.barCouncilId',
         'lp.createdAt',
         'lp.degree',
         'lp.bio',
         'lp.gender',
+        'lp.isVerified',
       ])
       .innerJoin('lp.user', 'user')
       .addSelect(['user.id', 'user.fullName', 'user.email', 'user.phone', 'user.avatarUrl'])
-      .innerJoinAndMapOne('user.userRole', 'user.userRoles', 'ur', 'ur.role_code = :roleCode', {
-        roleCode: RoleCode.LAWYER,
-      })
       .leftJoin('lp.lawyerPracticeAreas', 'lpa')
       .addSelect(['lpa.id', 'lpa.practiceAreaId'])
       .leftJoin('lpa.practiceArea', 'practiceArea')
       .addSelect(['practiceArea.id', 'practiceArea.name']);
 
     if (search) {
-      qb.andWhere('(user.full_name ILIKE :search OR lp.bar_council_id ILIKE :search)', {
-        search: `%${search}%`,
-      });
+      qb.andWhere(
+        '(user.full_name ILIKE :search OR lp.bar_council_id ILIKE :search OR user.email ILIKE :search OR lp.address_line_1 ILIKE :search OR lp.address_line_2 ILIKE :search OR lp.city ILIKE :search)',
+        {
+          search: `%${search}%`,
+        }
+      );
     }
 
     if (practiceAreaId) {
@@ -75,9 +82,7 @@ export class LawyerProfilesRepository extends Repository<LawyerProfilesEntity> {
     }
 
     if (roleStatus) {
-      qb.andWhere('ur.status = :roleStatus', {
-        roleStatus: roleStatus,
-      });
+      qb.innerJoin('user.userRoles', 'ur').andWhere('ur.status = :roleStatus', { roleStatus });
     }
 
     return qb;

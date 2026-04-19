@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  Get,
   ParseFilePipeBuilder,
   Post,
   UploadedFile,
@@ -13,13 +14,17 @@ import { CurrentUser } from 'src/auth/decorators';
 import { JwtAuthGuard } from 'src/auth/guards';
 import { IJwtPayload } from 'src/types';
 import { AssetsService } from './assets.service';
+import { PushNotificationService } from 'src/push/push-notification.service';
 
 @Controller('assets')
-@UseGuards(JwtAuthGuard)
+// @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 @ApiTags('Assets')
 export class AssetsController {
-  constructor(private readonly assetsService: AssetsService) {}
+  constructor(
+    private readonly assetsService: AssetsService,
+    private readonly pushNotificationService: PushNotificationService
+  ) {}
 
   @Post('upload')
   @ApiConsumes('multipart/form-data')

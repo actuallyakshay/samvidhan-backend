@@ -52,8 +52,26 @@ export enum MessageType {
   AUDIO = 'audio',
 }
 
+/** Case thread chat: who sent / whose read cursor (no per-user joins in the UI). */
+export enum CaseMessageParticipantKind {
+  USER = 'user',
+  LAWYER = 'lawyer',
+  ADMIN = 'admin',
+}
+
 export enum BillingCycle {
   MONTHLY = 'monthly',
   YEARLY = 'yearly',
 }
 
+/** Mirrors Razorpay subscription `status` strings. */
+export enum RazorpaySubscriptionStatus {
+  CREATED = 'created',
+  AUTHENTICATED = 'authenticated',
+  ACTIVE = 'active',
+  PENDING = 'pending',
+  HALTED = 'halted',
+  CANCELLED = 'cancelled',
+  COMPLETED = 'completed',
+  EXPIRED = 'expired',
+}

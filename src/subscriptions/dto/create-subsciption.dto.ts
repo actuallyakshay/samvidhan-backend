@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
 import { BillingCycle } from 'src/enums';
 
 export class CreateSubscriptionPlanInput {
@@ -27,4 +27,10 @@ export class CreateSubscriptionPlanInput {
   @IsEnum(BillingCycle)
   @IsNotEmpty()
   billingCycle: BillingCycle;
+
+  @ApiPropertyOptional({ example: 'plan_xxxx' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  razorpayPlanId?: string;
 }

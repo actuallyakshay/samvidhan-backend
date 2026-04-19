@@ -57,14 +57,10 @@ export class CasesController {
   @Get(':caseId/messages')
   getCaseMessages(
     @Param('caseId', ParseUUIDPipe) caseId: string,
-    @Query() query: GetCaseMessagesQueryDto,
-    @CurrentUser() user: IJwtPayload
+    @Query() query: GetCaseMessagesQueryDto
   ) {
     return this.casesService.getCaseMessagesPage({
       caseId,
-      userId: user.sub,
-      activeRole: user.activeRole as string | undefined,
-      isAdmin: user.isAdmin,
       beforeMessageId: query.beforeMessageId,
       limit: query.limit,
     });

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { AdminOtpChallengesRepository } from 'src/data/repositories';
@@ -17,11 +17,11 @@ export class AdminOtpService {
     return Math.max(1, min) * 60 * 1000;
   }
 
+
   async sendChallenge(
     userId: string,
     requestingEmail: string
   ): Promise<{ expiresInSeconds: number }> {
-    const to = ['akshay.rajput1197@gmail.com'];
 
     await this.challengesRepo.delete({ userId });
 
@@ -33,7 +33,6 @@ export class AdminOtpService {
 
     const expiresMinutes = Math.max(1, Math.round(this.expiryMs() / 60000));
     await this.mailService.sendAdminLoginOtp({
-      to,
       requestingEmail,
       code,
       expiresMinutes,

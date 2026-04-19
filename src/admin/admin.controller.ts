@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthService } from 'src/auth/auth.service';
-import { CurrentUser } from 'src/auth/decorators';
+import { CurrentUser, SkipAdminAuth } from 'src/auth/decorators';
 import { ChangePasswordInput } from 'src/auth/dto/auth.dto';
 import { AdminAuthGuard } from 'src/auth/guards/admin-auth.guard';
 import {
@@ -39,6 +39,11 @@ import {
 } from './dto';
 import { AddLawyerInput } from './dto/add-lawyer.dto';
 import { UpdateSettingsInput } from './dto/admin-settings.dto';
+import {
+  GetLawyerPendingDocumentsQueryDto,
+  ReviewLawyerDocumentDto,
+} from './dto/review-lawyer-document.dto';
+import { SetLawyerVerificationDto } from './dto/set-lawyer-verification.dto';
 import { GetCaseSessionRequestsQueryDto } from './dto/session-requests.dto';
 
 @ApiTags('Admin')
@@ -69,6 +74,16 @@ export class AdminController {
   @Get('users/:userId')
   getUserById(@Param('userId') userId: string) {
     return this.adminService.getUserById({ userId });
+  }
+
+  @Get('lawyers/:lawyerId/documents')
+  getLawyerDocuments(@Param('lawyerId', ParseUUIDPipe) lawyerId: string) {
+    return this.adminService.getLawyerDocuments({ lawyerId });
+  }
+
+  @Get('lawyers/pending-documents')
+  getLawyerPendingDocuments(@Query() query: GetLawyerPendingDocumentsQueryDto) {
+    return this.adminService.getLawyerPendingDocuments({ query });
   }
 
   @Get('lawyers/:lawyerId')
@@ -138,6 +153,7 @@ export class AdminController {
     return this.adminService.getCases({ query });
   }
 
+  @SkipAdminAuth()
   @Get('settings')
   getAdminSettings() {
     return this.adminService.getAdminSettings();
@@ -172,6 +188,28 @@ export class AdminController {
     return this.adminService.createCaseNote({
       caseId,
       body: { note: body.note, author: CaseSessionRequestRaisedBy.ADMIN },
+    });
+  }
+
+  @Patch('lawyers/documents/:documentId/review')
+  reviewLawyerDocument(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Body() body: ReviewLawyerDocumentDto
+  ) {
+    return this.adminService.reviewLawyerDocument({
+      documentId,
+      body,
+    });
+  }
+
+  @Patch('lawyers/:lawyerId/verification')
+  setLawyerVerification(
+    @Param('lawyerId', ParseUUIDPipe) lawyerId: string,
+    @Body() body: SetLawyerVerificationDto
+  ) {
+    return this.adminService.setLawyerVerification({
+      lawyerId,
+      isVerified: body.isVerified,
     });
   }
 

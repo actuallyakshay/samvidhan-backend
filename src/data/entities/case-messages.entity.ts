@@ -1,4 +1,4 @@
-import { MessageType } from 'src/enums';
+import { CaseMessageParticipantKind, MessageType } from 'src/enums';
 import {
   Column,
   CreateDateColumn,
@@ -10,8 +10,6 @@ import {
   Relation,
 } from 'typeorm';
 import { CasesEntity } from './cases.entity';
-import { UsersEntity } from './users.entity';
-import { AssetsEntity } from './assets.entity';
 
 @Entity('case_messages')
 @Index(['caseId', 'createdAt'])
@@ -26,12 +24,8 @@ export class CaseMessagesEntity {
   @Column({ name: 'case_id' })
   caseId: string;
 
-  @ManyToOne(() => UsersEntity)
-  @JoinColumn({ name: 'sender_id' })
-  sender: Relation<UsersEntity>;
-
-  @Column({ name: 'sender_id' })
-  senderId: string;
+  @Column({ name: 'sender_kind', type: 'varchar', length: 16 })
+  senderKind: CaseMessageParticipantKind;
 
   @Column({
     name: 'message_type',
@@ -44,12 +38,12 @@ export class CaseMessagesEntity {
   @Column({ name: 'message_text', type: 'text', nullable: true })
   messageText: string;
 
-  @ManyToOne(() => AssetsEntity)
-  @JoinColumn({ name: 'asset_id' })
-  asset: Relation<AssetsEntity>;
+  /** GCP (or other) URL for chat image/PDF — no join to assets table. */
+  @Column({ name: 'asset_url', type: 'text', nullable: true })
+  assetUrl: string | null;
 
-  @Column({ name: 'asset_id', nullable: true })
-  assetId: string;
+  @Column({ name: 'asset_name', type: 'varchar', length: 512, nullable: true })
+  assetName: string | null;
 
   @Column({ name: 'is_read', default: false })
   isRead: boolean;

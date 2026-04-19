@@ -1,19 +1,30 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UsersRepository } from 'src/data/repositories/users.repository';
 import { IJwtPayload } from 'src/types';
+import { SKIP_ADMIN_AUTH_KEY } from '../decorators/skip-admin-auth.decorator';
 import { extractAccessToken } from '../extract-access-token';
 
 @Injectable()
 export class AdminAuthGuard implements CanActivate {
   constructor(
+    private readonly reflector: Reflector,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly usersRepository: UsersRepository
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const skip = this.reflector.getAllAndOverride<boolean>(SKIP_ADMIN_AUTH_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (skip) {
+      return true;
+    }
+
     try {
       const request = context.switchToHttp().getRequest();
       const token = extractAccessToken(request);

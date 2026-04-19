@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDate,
   IsDateString,
   IsOptional,
@@ -77,4 +78,9 @@ export class UpdateLawyerInput {
   @IsOptional()
   @IsUUID('all', { each: true })
   lawyerPracticeAreas?: string[];
+
+  @ApiPropertyOptional({ example: true })
+  @IsBoolean()
+  @IsOptional()
+  isVerified?: boolean;
 }

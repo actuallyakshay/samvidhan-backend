@@ -18,6 +18,7 @@ import {
 import { AdminSettingsRepository, LawyerPracticeAreasRepository } from 'src/data/repositories';
 import { CaseSessionRequestRepository } from 'src/data/repositories/case-session-request.repository';
 import { CasesRepository } from 'src/data/repositories/cases.repository';
+import { LawyerDocumentsRepository } from 'src/data/repositories/lawyer-documents.repository';
 import { LawyerProfilesRepository } from 'src/data/repositories/lawyer-profiles.repository';
 import { UserRolesRepository } from 'src/data/repositories/user-roles.repository';
 import { UsersRepository } from 'src/data/repositories/users.repository';
@@ -36,6 +37,10 @@ import {
 } from './dto';
 import { AddLawyerInput } from './dto/add-lawyer.dto';
 import { UpdateSettingsInput } from './dto/admin-settings.dto';
+import {
+  GetLawyerPendingDocumentsQueryDto,
+  ReviewLawyerDocumentDto,
+} from './dto/review-lawyer-document.dto';
 import { GetCaseSessionRequestsQueryDto } from './dto/session-requests.dto';
 
 @Injectable()
@@ -43,6 +48,7 @@ export class AdminService {
   constructor(
     private readonly usersRepository: UsersRepository,
     private readonly lawyerProfilesRepository: LawyerProfilesRepository,
+    private readonly lawyerDocumentsRepository: LawyerDocumentsRepository,
     private readonly casesRepository: CasesRepository,
     private readonly userRolesRepository: UserRolesRepository,
     private readonly caseSessionRequestsRepository: CaseSessionRequestRepository,
@@ -181,6 +187,7 @@ export class AdminService {
       careerStartDate: body.careerStartDate,
       bio: body.bio,
       degree: body.degree,
+      isVerified: false,
     });
 
     if (body?.lawyerPracticeAreas?.length) {
@@ -231,6 +238,24 @@ export class AdminService {
 
   async assignLawyerToCase(input: { caseId: string; lawyerId: string }) {
     const { caseId, lawyerId } = input;
+
+    const profile = await this.lawyerProfilesRepository.findOne({
+      where: { id: lawyerId },
+      select: { id: true, userId: true, isVerified: true },
+    });
+    if (!profile) {
+      throw new NotFoundException('Lawyer not found');
+    }
+    if (!profile.isVerified) {
+      throw new BadRequestException('Only verified lawyers can be assigned to a case');
+    }
+
+    const lawyerRole = await this.userRolesRepository.findOne({
+      where: { userId: profile.userId, roleCode: RoleCode.LAWYER },
+    });
+    if (!lawyerRole || lawyerRole.status !== UserRoleStatus.ACTIVE) {
+      throw new BadRequestException('Lawyer role is not active');
+    }
 
     await this.casesRepository.update(caseId, {
       assignedLawyerId: lawyerId,
@@ -356,6 +381,7 @@ export class AdminService {
           barCouncilId: true,
           degree: true,
           bio: true,
+          isVerified: true,
           user: {
             id: true,
             fullName: true,
@@ -414,11 +440,51 @@ export class AdminService {
 
   async updateLawyerProfile(input: { lawyerId: string; body: UpdateLawyerInput }) {
     const { lawyerId, body } = input;
+    const { userProfile, lawyerPracticeAreas, ...rest } = body;
+
     const foundLawyerProfile = await this.lawyerProfilesRepository.findOne({
       where: { id: lawyerId },
-      select: { userId: true, id: true },
     });
-    return this.lawyersService.updateLawyerProfile({ userId: foundLawyerProfile.userId, body });
+
+    if (Object.keys(userProfile ?? {}).length > 0) {
+      await this.usersRepository.update({ id: foundLawyerProfile.userId }, { ...userProfile });
+    }
+    return this.lawyerProfilesRepository.update(
+      { id: lawyerId },
+      { ...foundLawyerProfile, ...rest }
+    );
+  }
+
+  getLawyerDocuments(input: { lawyerId: string }) {
+    const { lawyerId } = input;
+
+    return this.lawyerDocumentsRepository.find({
+      where: {
+        lawyerProfileId: lawyerId,
+      },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async reviewLawyerDocument(input: { documentId: string; body: ReviewLawyerDocumentDto }) {
+    const { documentId, body } = input;
+
+    await this.lawyerDocumentsRepository.update({ id: documentId }, { ...body });
+
+    return { message: 'Document reviewed successfully' };
+  }
+
+  async setLawyerVerification(input: { lawyerId: string; isVerified: boolean }) {
+    const { lawyerId, isVerified } = input;
+
+    const profile = await this.lawyerProfilesRepository.findOne({ where: { id: lawyerId } });
+    if (!profile) {
+      throw new NotFoundException('Lawyer not found');
+    }
+
+    await this.lawyerProfilesRepository.update({ id: lawyerId }, { isVerified });
+
+    return { lawyerId, isVerified };
   }
 
   async updateCaseSessionRequest(input: {
@@ -472,8 +538,6 @@ export class AdminService {
     const { caseId, query } = input;
     return this.casesService.getCaseMessagesPage({
       caseId,
-      userId: '',
-      isAdmin: true,
       beforeMessageId: query.beforeMessageId,
       limit: query.limit,
     });
@@ -483,16 +547,32 @@ export class AdminService {
     return this.casesService.getCaseChatUnreadSummaryForAdmin({ userId: input.userId });
   }
 
-  markCaseChatRead(input: {
-    caseId: string;
-    userId: string;
-    body: MarkCaseChatReadDto;
-  }) {
+  markCaseChatRead(input: { caseId: string; userId: string; body: MarkCaseChatReadDto }) {
     return this.casesService.markCaseChatRead({
       caseId: input.caseId,
       userId: input.userId,
       isAdmin: true,
       body: input.body,
     });
+  }
+
+  async getLawyerPendingDocuments(input: { query: GetLawyerPendingDocumentsQueryDto }) {
+    const { query } = input;
+    const { skip, take } = getPageValues(query);
+
+    const qb = this.lawyerDocumentsRepository
+      .createQueryBuilder('ld')
+      .where('ld.isApproved = false')
+      .leftJoin('ld.lawyerProfile', 'lp')
+      .addSelect(['lp.id', 'lp.isVerified'])
+      .leftJoin('lp.user', 'u')
+      .addSelect(['u.id', 'u.fullName', 'u.avatarUrl'])
+      .orderBy('ld.createdAt', 'DESC')
+      .skip(skip)
+      .take(take);
+
+    const [data, total] = await qb.getManyAndCount();
+    const pagination = buildPaginationOutput(total, query);
+    return { data, pagination };
   }
 }

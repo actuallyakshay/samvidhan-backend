@@ -1,15 +1,30 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CasesRepository, UsersRepository } from 'src/data/repositories';
+import { CasesRepository, LawyerProfilesRepository, UsersRepository } from 'src/data/repositories';
 import { CaseStatus, RoleCode, UserRoleStatus } from 'src/enums';
 import { In, Not } from 'typeorm';
 import { UpdateUserInput } from './dto';
+import { PushNotificationService } from 'src/push/push-notification.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly usersRepository: UsersRepository,
-    private readonly casesRepository: CasesRepository
+    private readonly casesRepository: CasesRepository,
+    private readonly lawyerProfilesRepository: LawyerProfilesRepository,
+    private readonly pushNotificationService: PushNotificationService
   ) {}
+
+  // async onModuleInit() {
+  //   const resp = await this.pushNotificationService.sendToUserId(
+  //     'f7e22389-da9c-4349-a348-be2ac84eae7e',
+  //     {
+  //       body: 'Hello, this is a test notification',
+  //       title: 'Test Notification',
+  //       clickActionUrl: 'https://www.google.com',
+  //     }
+  //   );
+  //   console.log(resp);
+  // }
 
   async me(input: { userId: string; activeRole?: RoleCode | string }) {
     const { userId, activeRole = RoleCode.USER } = input;
@@ -55,11 +70,23 @@ export class UsersService {
         throw new BadRequestException('Phone number already in use');
       }
     }
+    const foundLawyerProfile = await this.lawyerProfilesRepository.findOne({ where: { userId } });
 
-    await this.usersRepository.update(
-      { id: userId },
-      { ...body, ...(body.phone && { isProfileCompleted: true }) }
-    );
+    await Promise.all([
+      this.usersRepository.update(
+        { id: userId },
+        { ...body, ...(body.phone && { isProfileCompleted: true }) }
+      ),
+      ...(foundLawyerProfile
+        ? [
+            this.lawyerProfilesRepository.update(
+              { id: foundLawyerProfile.id },
+              { isVerified: false }
+            ),
+          ]
+        : []),
+    ]);
+
     return { message: 'User updated successfully' };
   }
 
@@ -100,5 +127,13 @@ export class UsersService {
       emergencyCasesCount: emergencyCases,
       subscriptionPlan: {},
     };
+  }
+
+  async updateFcmToken(input: { userId: string; body: { fcmToken: string } }) {
+    const { userId, body } = input;
+
+    await this.usersRepository.update({ id: userId }, { fcmToken: body.fcmToken });
+
+    return { message: 'FCM token updated successfully' };
   }
 }

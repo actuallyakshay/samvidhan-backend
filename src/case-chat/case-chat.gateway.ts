@@ -36,21 +36,8 @@ export class CaseChatGateway implements OnGatewayConnection {
     private readonly auth: CaseChatAuthService
   ) {}
 
-  async handleConnection(client: Socket) {
-    try {
-      const user = await this.auth.verifySocket(client);
-      client.data.user = user;
-      await client.join(userNotifyRoom(user.sub));
-      if (user.isAdmin) await client.join(ADMINS_NOTIFY_ROOM);
-    } catch {
-      client.disconnect(true);
-    }
-  }
-
-  /** Join/send can run before async `handleConnection` finishes; verify here too. */
-  private async ensureUser(client: Socket): Promise<CaseChatSocketUser | null> {
-    const existing = client.data.user as CaseChatSocketUser | undefined;
-    if (existing) return existing;
+  /** Verify JWT, attach `client.data.user`, and return user — or `null` if invalid. */
+  private async authenticateClient(client: Socket): Promise<CaseChatSocketUser | null> {
     try {
       const user = await this.auth.verifySocket(client);
       client.data.user = user;
@@ -60,20 +47,30 @@ export class CaseChatGateway implements OnGatewayConnection {
     }
   }
 
+  async handleConnection(client: Socket) {
+    const user = await this.authenticateClient(client);
+    if (!user) {
+      client.disconnect(true);
+      return;
+    }
+    await client.join(userNotifyRoom(user.sub));
+    if (user.isAdmin) await client.join(ADMINS_NOTIFY_ROOM);
+  }
+
+  /** Join/send can run before async `handleConnection` finishes; reuse cached user when set. */
+  private async ensureUser(client: Socket): Promise<CaseChatSocketUser | null> {
+    const existing = client.data.user as CaseChatSocketUser | undefined;
+    if (existing) return existing;
+    return this.authenticateClient(client);
+  }
+
   @SubscribeMessage(CHAT_JOIN)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async join(@ConnectedSocket() client: Socket, @MessageBody() body: ChatJoinDto) {
     const user = await this.ensureUser(client);
     if (!user) return { ok: false };
-    try {
-      await this.caseChat.joinRoom(user, body.caseId);
-      await client.join(this.caseChat.room(body.caseId));
-      return { ok: true };
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Join failed';
-      client.emit(CHAT_ERROR, { code: 'JOIN', message });
-      return { ok: false };
-    }
+    await client.join(this.caseChat.room(body.caseId));
+    return { ok: true };
   }
 
   @SubscribeMessage(CHAT_SEND)
@@ -94,19 +91,20 @@ export class CaseChatGateway implements OnGatewayConnection {
         caseCode: persisted.caseCode,
         message: {
           id: message.id,
-          senderId: message.senderId,
-          senderName: message.senderName,
           senderRole: message.senderRole,
           content: message.content,
           timestamp: message.timestamp,
+          messageType: message.messageType,
+          assetUrl: message.assetUrl ?? undefined,
+          assetName: message.assetName ?? undefined,
         },
       };
       const senderId = user.sub;
-      if (persisted.ownerUserId !== senderId) {
-        this.server.to(userNotifyRoom(persisted.ownerUserId)).emit(CHAT_NOTIFY, notifyPayload);
-      }
-      if (persisted.lawyerUserId && persisted.lawyerUserId !== senderId) {
-        this.server.to(userNotifyRoom(persisted.lawyerUserId)).emit(CHAT_NOTIFY, notifyPayload);
+      const participantIds = [persisted.ownerUserId, persisted.lawyerUserId].filter(
+        (uid): uid is string => Boolean(uid) && uid !== senderId
+      );
+      for (const uid of participantIds) {
+        this.server.to(userNotifyRoom(uid)).emit(CHAT_NOTIFY, notifyPayload);
       }
       client.to(ADMINS_NOTIFY_ROOM).emit(CHAT_NOTIFY, notifyPayload);
 

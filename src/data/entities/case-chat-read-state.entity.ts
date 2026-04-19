@@ -1,3 +1,4 @@
+import { CaseMessageParticipantKind } from 'src/enums';
 import {
   Column,
   Entity,
@@ -11,22 +12,14 @@ import {
 } from 'typeorm';
 import { CasesEntity } from './cases.entity';
 import { CaseMessagesEntity } from './case-messages.entity';
-import { UsersEntity } from './users.entity';
 
 @Entity('case_chat_read_states')
-@Unique(['userId', 'caseId'])
-@Index(['userId'])
+@Unique(['caseId', 'readerKind'])
 @Index(['caseId'])
+@Index(['readerKind'])
 export class CaseChatReadStateEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-  @ManyToOne(() => UsersEntity, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'user_id' })
-  user: Relation<UsersEntity>;
-
-  @Column({ name: 'user_id' })
-  userId: string;
 
   @ManyToOne(() => CasesEntity, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'case_id' })
@@ -34,6 +27,9 @@ export class CaseChatReadStateEntity {
 
   @Column({ name: 'case_id' })
   caseId: string;
+
+  @Column({ name: 'reader_kind', type: 'varchar', length: 16 })
+  readerKind: CaseMessageParticipantKind;
 
   @ManyToOne(() => CaseMessagesEntity, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'last_read_message_id' })

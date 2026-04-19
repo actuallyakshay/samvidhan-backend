@@ -1,14 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { GetCasesQueryDto } from 'src/cases/dto';
 import { buildPaginationOutput } from 'src/data/dto/pagination.dto';
 import { CasesRepository } from 'src/data/repositories/cases.repository';
+import { LawyerDocumentsRepository } from 'src/data/repositories/lawyer-documents.repository';
 import { LawyerPracticeAreasRepository } from 'src/data/repositories/lawyer-practice-areas.repository';
 import { LawyerProfilesRepository } from 'src/data/repositories/lawyer-profiles.repository';
 import { UsersRepository } from 'src/data/repositories/users.repository';
 import { CaseStatus } from 'src/enums';
 import { In } from 'typeorm';
-import { GetLawyersQueryDto } from './dto';
+import { CreateLawyerDocumentDto, GetLawyersQueryDto } from './dto';
 import { UpdateLawyerInput } from './dto/update-lawyer.dto';
+
+const MAX_DOCUMENTS_LIMIT = 50;
 
 @Injectable()
 export class LawyersService {
@@ -16,7 +19,8 @@ export class LawyersService {
     private readonly lawyerProfilesRepository: LawyerProfilesRepository,
     private readonly casesRepository: CasesRepository,
     private readonly usersRepository: UsersRepository,
-    private readonly lawyerPracticeAreasRepository: LawyerPracticeAreasRepository
+    private readonly lawyerPracticeAreasRepository: LawyerPracticeAreasRepository,
+    private readonly lawyerDocumentsRepository: LawyerDocumentsRepository
   ) {}
 
   async getLawyers(input: { query: GetLawyersQueryDto }) {
@@ -115,25 +119,65 @@ export class LawyersService {
   }
 
   async updateLawyerProfile(input: { userId: string; body: UpdateLawyerInput }) {
-    const {
-      userId,
-      body: { userProfile, lawyerPracticeAreas, ...rest },
-    } = input;
+    const { userId, body } = input;
+    const { userProfile, lawyerPracticeAreas, ...rest } = body;
 
-    if (userProfile) {
-      await this.usersRepository.update({ id: userId }, userProfile);
+    if (Object.keys(userProfile ?? {}).length > 0) {
+      await this.usersRepository.update({ id: userId }, { ...userProfile });
     }
 
     const foundLawyerProfile = await this.lawyerProfilesRepository.findOne({ where: { userId } });
 
-    if (lawyerPracticeAreas) {
+    if (lawyerPracticeAreas?.length > 0) {
       await this.createLawyerPracticeAreas({
         lawyerId: foundLawyerProfile.id,
         practiceAreaIds: lawyerPracticeAreas,
       });
     }
 
-    return this.lawyerProfilesRepository.update({ userId }, rest);
+    return this.lawyerProfilesRepository.update(
+      { userId },
+      {
+        ...foundLawyerProfile,
+        ...rest,
+        isVerified: false,
+      }
+    );
+  }
+
+  async createLawyerDocument(input: { userId: string; dto: CreateLawyerDocumentDto }) {
+    const { userId, dto } = input;
+
+    const profile = await this.lawyerProfilesRepository.findOne({ where: { userId } });
+
+    const countDocs = await this.lawyerDocumentsRepository.count({
+      where: { lawyerProfileId: profile.id },
+    });
+    if (countDocs >= MAX_DOCUMENTS_LIMIT) {
+      throw new BadRequestException('You can only upload up to 15 documents');
+    }
+
+    await Promise.all([
+      this.lawyerProfilesRepository.update({ id: profile.id }, { isVerified: false }),
+      this.lawyerDocumentsRepository.save({
+        lawyerProfileId: profile.id,
+        assetUrl: dto.assetUrl,
+        assetName: dto.assetName,
+        isApproved: false,
+      }),
+    ]);
+
+    return { message: 'Document created successfully' };
+  }
+
+  async listLawyerDocumentsForUser(input: { userId: string }) {
+    const { userId } = input;
+    const profile = await this.lawyerProfilesRepository.findOne({ where: { userId } });
+
+    return this.lawyerDocumentsRepository.find({
+      where: { lawyerProfileId: profile.id },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   async getLawyerAnalytics(input: { userId: string }) {
@@ -170,6 +214,22 @@ export class LawyersService {
       totalHandledCases,
       assignedCases,
       lawyerExp: lawyerProfile.careerStartDate,
+    };
+  }
+
+  async deleteLawyerDocument(input: { documentId: string; userId: string }) {
+    const { documentId, userId } = input;
+
+    const profile = await this.lawyerProfilesRepository.findOne({ where: { userId } });
+
+    await Promise.all([
+      this.lawyerProfilesRepository.update({ id: profile.id }, { isVerified: false }),
+      this.lawyerDocumentsRepository.delete({ id: documentId }),
+    ]);
+
+    return {
+      message:
+        'Your Profile has been unverified, Once Admin verifies your profile, your profile will show as verified again.',
     };
   }
 }
