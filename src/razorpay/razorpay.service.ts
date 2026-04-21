@@ -37,10 +37,10 @@ export class RazorpayService {
     private readonly plans: SubscriptionPlansRepository,
     private readonly userSubs: UserSubscriptionsRepository
   ) {
-    this.client = new Razorpay({
-      key_id: this.config.getOrThrow('RAZORPAY_KEY_ID'),
-      key_secret: this.config.getOrThrow('RAZORPAY_KEY_SECRET'),
-    });
+    // this.client = new Razorpay({
+    //   key_id: this.config.getOrThrow('RAZORPAY_KEY_ID'),
+    //   key_secret: this.config.getOrThrow('RAZORPAY_KEY_SECRET'),
+    // });
   }
 
   private unixToDate(sec: number | null | undefined): Date | null {

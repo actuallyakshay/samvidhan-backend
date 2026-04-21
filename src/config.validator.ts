@@ -140,21 +140,23 @@ class EnvironmentVariables {
   @IsOptional()
   MAIL_CONNECTION_TIMEOUT_MS?: number;
 
-  /** If set, Razorpay API + webhooks are enabled; key secret and webhook secret are then required. */
-  @IsString()
-  @IsOptional()
-  RAZORPAY_KEY_ID?: string;
+  // /** If set, Razorpay API + webhooks are enabled; key secret and webhook secret are then required. */
+  // @IsString()
+  // @IsOptional()
+  // RAZORPAY_KEY_ID?: string;
 
-  @ValidateIf((o) => !!o.RAZORPAY_KEY_ID?.trim())
-  @IsString()
-  @IsNotEmpty()
-  RAZORPAY_KEY_SECRET?: string;
+  // @ValidateIf((o) => !!o.RAZORPAY_KEY_ID?.trim())
+  // // @IsString()
+  // // @IsNotEmpty()
+  // @IsOptional()
+  // RAZORPAY_KEY_SECRET?: string;
 
-  /** Webhook signing secret from the Razorpay Dashboard (not the API key secret). */
-  @ValidateIf((o) => !!o.RAZORPAY_KEY_ID?.trim())
-  @IsString()
-  @IsNotEmpty()
-  RAZORPAY_WEBHOOK_SECRET?: string;
+  // /** Webhook signing secret from the Razorpay Dashboard (not the API key secret). */
+  // @ValidateIf((o) => !!o.RAZORPAY_KEY_ID?.trim())
+  // // @IsString()
+  // // @IsNotEmpty()
+  // @IsOptional()
+  // RAZORPAY_WEBHOOK_SECRET?: string;
 }
 
 export function validateConfig(configuration: Record<string, unknown>) {

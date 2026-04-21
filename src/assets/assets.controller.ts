@@ -17,7 +17,7 @@ import { AssetsService } from './assets.service';
 import { PushNotificationService } from 'src/push/push-notification.service';
 
 @Controller('assets')
-// @UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 @ApiTags('Assets')
 export class AssetsController {

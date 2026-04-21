@@ -31,3 +31,10 @@ export enum AssetAuthor {
   LAWYER = 'lawyer',
   ADMIN = 'admin',
 }
+
+export interface PushPayload {
+  title: string;
+  body: string;
+  clickActionUrl?: string;
+  data?: Record<string, string>;
+}
