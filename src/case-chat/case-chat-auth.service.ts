@@ -38,6 +38,7 @@ export class CaseChatAuthService {
       email: ctx.email,
       activeRole: ctx.activeRole,
       isAdmin: ctx.isAdmin,
+      exp: payload.exp,
     };
   }
 

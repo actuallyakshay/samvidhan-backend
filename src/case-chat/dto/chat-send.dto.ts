@@ -27,6 +27,6 @@ export class ChatSendDto {
   assetName?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   clientMessageId?: string;
 }

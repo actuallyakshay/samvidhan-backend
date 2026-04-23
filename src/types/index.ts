@@ -19,7 +19,10 @@ export type AuthenticatedUser = Omit<IJwtPayload, 'activeRole'> & {
 export type CaseChatSocketUser = Pick<
   AuthenticatedUser,
   'sub' | 'email' | 'activeRole' | 'isAdmin'
->;
+> & {
+  /** JWT expiry epoch (seconds). Cached so the gateway can re-verify before it lapses. */
+  exp?: number;
+};
 
 export enum LoginProvider {
   GOOGLE = 'google',

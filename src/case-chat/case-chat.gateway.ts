@@ -8,6 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { CaseChatSocketUser } from 'src/types';
 import { CaseChatAuthService } from './case-chat-auth.service';
 import { CaseChatService } from './case-chat.service';
 import {
@@ -19,9 +20,10 @@ import {
   CHAT_SEND,
   userNotifyRoom,
 } from './case-chat.constants';
-import { CaseChatSocketUser } from 'src/types';
 import { ChatJoinDto } from './dto/chat-join.dto';
 import { ChatSendDto } from './dto/chat-send.dto';
+
+const TOKEN_RECHECK_BUFFER_S = 60;
 
 @WebSocketGateway({
   path: '/api/socket.io',
@@ -36,7 +38,6 @@ export class CaseChatGateway implements OnGatewayConnection {
     private readonly auth: CaseChatAuthService
   ) {}
 
-  /** Verify JWT, attach `client.data.user`, and return user — or `null` if invalid. */
   private async authenticateClient(client: Socket): Promise<CaseChatSocketUser | null> {
     try {
       const user = await this.auth.verifySocket(client);
@@ -57,10 +58,16 @@ export class CaseChatGateway implements OnGatewayConnection {
     if (user.isAdmin) await client.join(ADMINS_NOTIFY_ROOM);
   }
 
-  /** Join/send can run before async `handleConnection` finishes; reuse cached user when set. */
+  /**
+   * Returns the cached user, re-verifying the JWT when it expires within
+   * TOKEN_RECHECK_BUFFER_S seconds. Disconnects and returns null on auth failure.
+   */
   private async ensureUser(client: Socket): Promise<CaseChatSocketUser | null> {
-    const existing = client.data.user as CaseChatSocketUser | undefined;
-    if (existing) return existing;
+    const cached = client.data.user as CaseChatSocketUser | undefined;
+    if (cached) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (!cached.exp || cached.exp > nowSec + TOKEN_RECHECK_BUFFER_S) return cached;
+    }
     return this.authenticateClient(client);
   }
 
@@ -68,23 +75,39 @@ export class CaseChatGateway implements OnGatewayConnection {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async join(@ConnectedSocket() client: Socket, @MessageBody() body: ChatJoinDto) {
     const user = await this.ensureUser(client);
-    if (!user) return { ok: false };
-    await client.join(this.caseChat.room(body.caseId));
-    return { ok: true };
+    if (!user) return { ok: false, error: 'Unauthorized' };
+
+    try {
+      await this.caseChat.assertCaseParticipant(user, body.caseId);
+      await client.join(this.caseChat.room(body.caseId));
+      return { ok: true };
+    } catch (e) {
+      const error = e instanceof Error ? e.message : 'Access denied';
+      client.emit(CHAT_ERROR, { code: 'JOIN', error });
+      return { ok: false, error };
+    }
   }
 
   @SubscribeMessage(CHAT_SEND)
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   async send(@ConnectedSocket() client: Socket, @MessageBody() body: ChatSendDto) {
     const user = await this.ensureUser(client);
-    if (!user) return { ok: false };
+    if (!user) return { ok: false, error: 'Unauthorized' };
+
     try {
-      const persisted = await this.caseChat.persistAndBroadcastPayload(user, body);
+      const persisted = await this.caseChat.persistMessage(user, body);
+
+      if (!persisted) {
+        // Idempotent duplicate — already delivered on the first attempt.
+        return { ok: true };
+      }
+
       const { message } = persisted;
-      const withAck = body.clientMessageId
+      const broadcastMsg = body.clientMessageId
         ? { ...message, clientMessageId: body.clientMessageId }
         : message;
-      this.server.to(this.caseChat.room(body.caseId)).emit(CHAT_MESSAGE, withAck);
+
+      this.server.to(this.caseChat.room(body.caseId)).emit(CHAT_MESSAGE, broadcastMsg);
 
       const notifyPayload = {
         caseId: persisted.caseId,
@@ -99,6 +122,7 @@ export class CaseChatGateway implements OnGatewayConnection {
           assetName: message.assetName ?? undefined,
         },
       };
+
       const senderId = user.sub;
       const participantIds = [persisted.ownerUserId, persisted.lawyerUserId].filter(
         (uid): uid is string => Boolean(uid) && uid !== senderId
@@ -110,9 +134,10 @@ export class CaseChatGateway implements OnGatewayConnection {
 
       return { ok: true };
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Send failed';
-      client.emit(CHAT_ERROR, { code: 'SEND', message });
-      return { ok: false };
+      const error = e instanceof Error ? e.message : 'Send failed';
+      client.emit(CHAT_ERROR, { code: 'SEND', error });
+      return { ok: false, error };
     }
   }
 }
+

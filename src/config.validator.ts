@@ -86,6 +86,11 @@ class EnvironmentVariables {
   @IsNotEmpty()
   GOOGLE_CLIENT_SECRET: string;
 
+  /** Redis connection URL for Socket.IO adapter and idempotency (optional; falls back to in-process). */
+  @IsString()
+  @IsOptional()
+  REDIS_URL?: string;
+
   /** Comma-separated frontend origins, e.g. https://app.example.com,https://www.example.com */
   @IsString()
   @IsOptional()
